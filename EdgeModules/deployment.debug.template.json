@@ -1,0 +1,100 @@
+{
+  "$schema-template": "1.0.0",
+  "modulesContent": {
+    "$edgeAgent": {
+      "properties.desired": {
+        "schemaVersion": "1.0",
+        "runtime": {
+          "type": "docker",
+          "settings": {
+            "minDockerVersion": "v1.25",
+            "loggingOptions": "",
+            "registryCredentials": {}
+          }
+        },
+        "systemModules": {
+          "edgeAgent": {
+            "type": "docker",
+            "settings": {
+              "image": "mcr.microsoft.com/azureiotedge-agent:1.0.6",
+              "createOptions": {}
+            }
+          },
+          "edgeHub": {
+            "type": "docker",
+            "status": "running",
+            "restartPolicy": "always",
+            "settings": {
+              "image": "mcr.microsoft.com/azureiotedge-hub:1.0.6",
+              "createOptions": {
+                "HostConfig": {
+                  "PortBindings": {
+                    "5671/tcp": [
+                      {
+                        "HostPort": "5671"
+                      }
+                    ],
+                    "8883/tcp": [
+                      {
+                        "HostPort": "8883"
+                      }
+                    ],
+                    "443/tcp": [
+                      {
+                        "HostPort": "443"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "modules": {
+          "DirectMethodReceiver": {
+            "version": "1.0",
+            "type": "docker",
+            "status": "running",
+            "restartPolicy": "always",
+            "settings": {
+              "image": "${MODULES.DirectMethodReceiver.debug}",
+              "createOptions": {}
+            },
+            "env": {
+              "APPINSIGHTS_INSTRUMENTATIONKEY": {
+                "value": "$APPINSIGHTS_INSTRUMENTATIONKEY"
+              }
+            }
+          },
+          "MessageForwarder": {
+            "version": "1.0",
+            "type": "docker",
+            "status": "running",
+            "restartPolicy": "always",
+            "settings": {
+              "image": "${MODULES.MessageForwarder.debug}",
+              "createOptions": {}
+            },
+            "env": {
+              "APPINSIGHTS_INSTRUMENTATIONKEY": {
+                "value": "$APPINSIGHTS_INSTRUMENTATIONKEY"
+              }
+            }
+          }
+        }
+      }
+    },
+    "$edgeHub": {
+      "properties.desired": {
+        "schemaVersion": "1.0",
+        "routes": {
+          "DirectMethodReceiver2MessageForwarder": "FROM /messages/modules/DirectMethodReceiver/outputs/* INTO BrokeredEndpoint(\"/modules/MessageForwarder/inputs/input1\")",
+          "MessageForwarder2IoTHub": "FROM /messages/modules/MessageForwarder/outputs/* INTO $upstream"
+        },
+        "storeAndForwardConfiguration": {
+          "timeToLiveSecs": 7200
+        }
+      }
+    }
+  }
+}

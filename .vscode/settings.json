@@ -1,0 +1,7 @@
+{
+  "azureFunctions.projectRuntime": "~2",
+  "azureFunctions.projectLanguage": "C#",
+  "azureFunctions.deploySubpath": "CloudFunctions/bin/Release/netcoreapp2.2/publish",
+  "azureFunctions.preDeployTask": "publish",
+  "debug.internalConsoleOptions": "neverOpen"
+}
