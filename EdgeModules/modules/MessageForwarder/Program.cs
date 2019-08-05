@@ -10,6 +10,9 @@ namespace MessageForwarder
     using Microsoft.Azure.Devices.Client;
     using Newtonsoft.Json;
     using Serilog;
+    using Serilog.Configuration;
+    using Serilog.Core;
+    using Serilog.Events;
 
     class Program
     {
@@ -19,6 +22,7 @@ namespace MessageForwarder
         private static TelemetryClient telemetry = new TelemetryClient();
 
         private static int counter = 0;
+        private static int HeartbeatRateMs = 300000;
         private static CancellationTokenSource _cts;
         public static int Main() => MainAsync().Result;
 
@@ -34,12 +38,19 @@ namespace MessageForwarder
             // Register message input handler
             await moduleClient.SetInputMessageHandlerAsync("input1", PipeMessage, moduleClient);
 
-            // Wait until the app unloads or is cancelled
             _cts = new CancellationTokenSource();
             AssemblyLoadContext.Default.Unloading += (ctx) => _cts.Cancel();
             Console.CancelKeyPress += (sender, cpe) => _cts.Cancel();
-            await WhenCancelled(_cts.Token);
 
+            var heartbeatEnv = Environment.GetEnvironmentVariable("HeartbeatRateMs");
+            if (!string.IsNullOrEmpty(heartbeatEnv))
+            {
+                HeartbeatRateMs = int.Parse(heartbeatEnv);
+            }
+            await SendHeartbeatForever(moduleClient, _cts.Token);
+
+            // Wait until the app unloads or is cancelled
+            await WhenCancelled(_cts.Token);
             return 0;
         }
 
@@ -176,6 +187,51 @@ namespace MessageForwarder
         }
 
         /// <summary>
+        /// This method sends a new heartbeat message every x seconds
+        /// </summary>
+        private static async Task SendHeartbeatForever(ModuleClient moduleClient, CancellationToken cancellationToken)
+        {
+            // Read ModuleId from env
+            string moduleId = Environment.GetEnvironmentVariable("IOTEDGE_MODULEID");
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var correlationId = Guid.NewGuid().ToString();
+                Log.Information($"New Heartbeat - CorrelationId={correlationId}");
+
+                var telemetryProperties = new Dictionary<string, string>
+                {
+                    { "correlationId", correlationId },
+                    { "processingStep", "80-Heartbeat-MessageForwarder"},
+                    { "edgeModuleId", Environment.GetEnvironmentVariable("IOTEDGE_MODULEID") }
+                };
+                telemetry.TrackEvent("80-Heartbeat-MessageForwarder", telemetryProperties);
+
+                var heartbeatMessage = new Message(Encoding.UTF8.GetBytes("{\"heartbeat\": true}"));
+                heartbeatMessage.ContentType = "application/json";
+                heartbeatMessage.ContentEncoding = "UTF-8";
+                heartbeatMessage.Properties.Add("correlationId", correlationId);
+                heartbeatMessage.Properties.Add("scope", "end2end");
+                heartbeatMessage.Properties.Add("heartbeat", "true");
+
+                try
+                {
+                    await moduleClient.SendEventAsync("output1", heartbeatMessage);
+                    telemetry.TrackEvent("81-Heartbeat-Sent-MessageForwarder", telemetryProperties);
+                    Log.Information("Heartbeat message sent");
+                }
+                catch (Exception e)
+                {
+                    Log.Error(e, "Error during message sending to Edge Hub");
+                    telemetry.TrackEvent("85-ErrorHeartbeatMessageNotSentToEdgeHub", telemetryProperties);
+                }
+
+                // Sleep for duration of HeartbeatRateMs
+                await Task.Delay(HeartbeatRateMs, cancellationToken);
+            }
+        }
+
+        /// <summary>
         /// Initialize logging using Serilog
         /// LogLevel can be controlled via RuntimeLogLevel env var
         /// </summary>
@@ -210,10 +266,40 @@ namespace MessageForwarder
             }
 
             // set logging sinks
-            loggerConfiguration.WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] - {Message}{NewLine}{Exception}");
+            loggerConfiguration.WriteTo.Console(outputTemplate: "<{Severity}> {Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] - {Message}{NewLine}{Exception}");
+            loggerConfiguration.Enrich.With(SeverityEnricher.Instance);
             loggerConfiguration.Enrich.FromLogContext();
             Log.Logger = loggerConfiguration.CreateLogger();
             Log.Information($"Initializied logger with log level {logLevel}");
         }
+
+
+    }
+
+    // This maps the Edge log level to the severity level based on Syslog severity levels.
+    // https://en.wikipedia.org/wiki/Syslog#Severity_level
+    // This allows tools to parse the severity level from the log text and use it to enhance the log
+    // For example errors can show up as red
+    class SeverityEnricher : ILogEventEnricher
+    {
+        static readonly IDictionary<LogEventLevel, int> LogLevelSeverityMap = new Dictionary<LogEventLevel, int>
+        {
+            [LogEventLevel.Fatal] = 0,
+            [LogEventLevel.Error] = 3,
+            [LogEventLevel.Warning] = 4,
+            [LogEventLevel.Information] = 6,
+            [LogEventLevel.Debug] = 7,
+            [LogEventLevel.Verbose] = 7
+        };
+
+        SeverityEnricher()
+        {
+        }
+
+        public static SeverityEnricher Instance => new SeverityEnricher();
+
+        public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory) =>
+            logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty(
+                "Severity", LogLevelSeverityMap[logEvent.Level]));
     }
 }

@@ -78,11 +78,7 @@ namespace Edge.End2End
                     telemetryProperties.Add("MethodReturnCode", $"{result.Status}");
                     if (IsSuccessStatusCode(result.Status))
                     {
-                        var metrics = new Dictionary<string, double>
-                        {
-                            { "StartEventsSent", 1}
-                        };
-                        telemetry.TrackEvent("11-SuccessfulMethodInvocation", telemetryProperties, metrics);
+                        telemetry.TrackEvent("11-SuccessfulMethodInvocation", telemetryProperties);
                         log.LogInformation($"[{destination}] Successful direct method call result code={result.Status}");
                     }
                     else

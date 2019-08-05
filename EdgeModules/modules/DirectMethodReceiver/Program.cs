@@ -10,6 +10,9 @@ namespace DirectMethodReceiver
     using Microsoft.Azure.Devices.Client;
     using Newtonsoft.Json;
     using Serilog;
+    using Serilog.Configuration;
+    using Serilog.Core;
+    using Serilog.Events;
 
     class Program
     {
@@ -34,6 +37,8 @@ namespace DirectMethodReceiver
 
             await moduleClient.SetMethodDefaultHandlerAsync(DefaultMethodHandler, moduleClient);
 
+            await moduleClient.SetMessageHandlerAsync(DefaultMessageHandler, moduleClient);
+
             // Wait until the app unloads or is cancelled
             _cts = new CancellationTokenSource();
             AssemblyLoadContext.Default.Unloading += (ctx) => _cts.Cancel();
@@ -41,6 +46,13 @@ namespace DirectMethodReceiver
             await WhenCancelled(_cts.Token);
 
             return 0;
+        }
+
+        private static Task<MessageResponse> DefaultMessageHandler(Message message, object userContext)
+        {
+            Log.Information($"Received new message on the DefaultMessageHandler!");
+            Log.Information(Encoding.UTF8.GetString(message.GetBytes()));
+            return Task.FromResult(MessageResponse.Completed);
         }
 
         /// <summary>
@@ -152,7 +164,7 @@ namespace DirectMethodReceiver
                 Log.Information($"NewMessageRequest method invocation received. Count={counterValue}. CorrelationId={request.CorrelationId}");
                 telemetry.TrackEvent("20-ReceivedDirectMethodRequest", telemetryProperties);
 
-                var message = new Message(Encoding.UTF8.GetBytes(request.Text));
+                var message = new Message(Encoding.UTF8.GetBytes("{\"text\": \"" + request.Text + "\"}"));
                 message.ContentType = "application/json";
                 message.ContentEncoding = "UTF-8";
                 message.Properties.Add("correlationId", request.CorrelationId);
@@ -218,11 +230,39 @@ namespace DirectMethodReceiver
             }
 
             // set logging sinks
-            loggerConfiguration.WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] - {Message}{NewLine}{Exception}");
+            loggerConfiguration.WriteTo.Console(outputTemplate: "<{Severity}> {Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] - {Message}{NewLine}{Exception}");
+            loggerConfiguration.Enrich.With(SeverityEnricher.Instance);
             loggerConfiguration.Enrich.FromLogContext();
             Log.Logger = loggerConfiguration.CreateLogger();
             Log.Information($"Initializied logger with log level {logLevel}");
         }
+    }
+
+    // This maps the Edge log level to the severity level based on Syslog severity levels.
+    // https://en.wikipedia.org/wiki/Syslog#Severity_level
+    // This allows tools to parse the severity level from the log text and use it to enhance the log
+    // For example errors can show up as red
+    class SeverityEnricher : ILogEventEnricher
+    {
+        static readonly IDictionary<LogEventLevel, int> LogLevelSeverityMap = new Dictionary<LogEventLevel, int>
+        {
+            [LogEventLevel.Fatal] = 0,
+            [LogEventLevel.Error] = 3,
+            [LogEventLevel.Warning] = 4,
+            [LogEventLevel.Information] = 6,
+            [LogEventLevel.Debug] = 7,
+            [LogEventLevel.Verbose] = 7
+        };
+
+        SeverityEnricher()
+        {
+        }
+
+        public static SeverityEnricher Instance => new SeverityEnricher();
+
+        public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory) =>
+            logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty(
+                "Severity", LogLevelSeverityMap[logEvent.Level]));
     }
 
     /// <summary>

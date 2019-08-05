@@ -28,16 +28,19 @@ namespace Edge.End2End
                 var correlationId = message.Properties["correlationId"].ToString();
                 log.LogInformation($"Message correlationId={correlationId}");
 
-                var telemetryProperties = new Dictionary<string, string>
+                if (message.Properties.ContainsKey("heartbeat"))
                 {
-                    { "correlationId", correlationId },
-                    { "processingStep", "100-IotHubMessageProcessor"}
-                };
-                var metrics = new Dictionary<string, double>
+                    log.LogInformation("Received hearbeat message. Not tracing this message.");
+                }
+                else
                 {
-                    { "EndEventsReceived", 1}
-                };
-                telemetry.TrackEvent("100-ReceivedIoTHubMessage", telemetryProperties, metrics);
+                    var telemetryProperties = new Dictionary<string, string>
+                    {
+                        { "correlationId", correlationId },
+                        { "processingStep", "100-IotHubMessageProcessor"}
+                    };
+                    telemetry.TrackEvent("100-ReceivedIoTHubMessage", telemetryProperties);
+                }
             }
             else
             {
