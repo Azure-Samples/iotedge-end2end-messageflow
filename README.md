@@ -1,3 +1,13 @@
+---
+page_type: sample
+languages:
+- csharp
+products:
+- azure
+description: "This solution is an end-to-end solution to test a full Azure IoT Edge setup. It consists of two parts:"
+urlFragment: iotedge-end2end-messageflow
+---
+
 # Azure IoT Edge - End2End testing loop
 
 This solution is an end-to-end solution to test a full Azure IoT Edge setup. It consists of two parts:
